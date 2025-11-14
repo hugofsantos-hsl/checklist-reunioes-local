@@ -255,20 +255,31 @@
                 auth = getAuth(app);
 
                 // 1. Configura o Listener de Autenticação primeiro
-                // Este listener será acionado imediatamente com o estado atual do usuário (null ou logado)
                 onAuthStateChanged(auth, (user) => {
+                    const currentUserIdEl = document.getElementById('currentUserId');
+                    const loadingMessageEl = document.getElementById('loadingMessage');
+
                     if (user) {
                         // Se houver usuário (token ou anônimo)
                         userId = user.uid;
-                        document.getElementById('currentUserId').textContent = userId;
+                        if (currentUserIdEl) currentUserIdEl.textContent = userId;
                         isAuthReady = true;
                         // Inicia o listener do Firestore APÓS a autenticação bem-sucedida
                         setupFirestoreListener(); 
                     } else {
                         // Se a autenticação falhar ou não houver usuário logado
-                        userId = 'Desconectado/Erro';
-                        document.getElementById('currentUserId').textContent = userId;
+                        userId = 'ERRO DE AUTENTICAÇÃO';
+                        if (currentUserIdEl) {
+                           currentUserIdEl.textContent = userId;
+                           currentUserIdEl.classList.add('text-red-600', 'font-bold');
+                        }
                         isAuthReady = false; 
+                        
+                        // Exibe mensagem de erro na área de carregamento
+                        if (loadingMessageEl) {
+                           loadingMessageEl.textContent = "Erro de autenticação inicial. Recarregue ou verifique a configuração.";
+                           loadingMessageEl.classList.add('text-red-600', 'font-bold');
+                        }
                     }
                 });
                 
@@ -290,7 +301,7 @@
                 }
             } catch (error) {
                 console.error("Tentativa de autenticação falhou:", error);
-                // Exibe uma mensagem de erro, mas não chama a si mesmo novamente.
+                // Exibe uma mensagem de erro temporária. O onAuthStateChanged tratará do estado persistente.
                 showMessage("Falha na autenticação inicial. Recarregue a página se os dados não aparecerem.", 'error');
             }
             // O resultado (sucesso ou falha) será processado pelo onAuthStateChanged
@@ -341,14 +352,15 @@
 
                 allMeetings = meetings;
                 renderMeetings(allMeetings);
-                // CORREÇÃO: Verifica se o elemento existe antes de tentar manipular suas classes.
+                // Esconde a mensagem de carregamento, com verificação de segurança
                 const loadingMessageEl = document.getElementById('loadingMessage');
                 if (loadingMessageEl) {
-                    loadingMessageEl.classList.add('hidden'); // Esconde a mensagem de carregamento
+                    loadingMessageEl.classList.add('hidden'); 
                 }
             }, (error) => {
                 console.error("Erro ao carregar dados em tempo real:", error);
-                showMessage("Falha na comunicação em tempo real com o banco de dados.", 'error');
+                // Mostra um erro claro se o listener falhar (pode ser problema de segurança/regras)
+                showMessage("Falha na comunicação em tempo real com o banco de dados. Verifique as regras de segurança.", 'error'); 
             });
         }
         
