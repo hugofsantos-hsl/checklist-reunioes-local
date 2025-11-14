@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checklist de Reuniões (Modo Local)</title>
+    <title>Checklist de Reuniões (Modo Colaborativo)</title>
     <!-- Carrega o Tailwind CSS para estilização moderna e responsiva -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -68,10 +68,13 @@
                 📋 Checklist de Reuniões
             </h1>
             <p class="text-xs text-center text-primary-light mb-2 font-semibold">
-                Modo Local: Salvo apenas neste dispositivo (Offline)
+                Modo Colaborativo: Dados salvos em tempo real (Firestore)
             </p>
-            <p id="statusDisplay" class="text-xs text-center text-red-500 mb-6 font-semibold">
-                Sem Colaboração: A lista é privada e não é compartilhada em tempo real.
+            <p id="statusDisplay" class="text-xs text-center text-primary-light mb-2 font-semibold">
+                ID do Usuário: <span id="currentUserId" class="font-bold text-gray-700">Carregando...</span>
+            </p>
+            <p class="text-xs text-center text-gray-500 mb-6 font-semibold">
+                Qualquer um com acesso ao app pode ver e editar esta lista.
             </p>
 
             <!-- Botão para Modo Tela Cheia/Sair -->
@@ -155,70 +158,49 @@
     </div>
 
 
-    <!-- Lógica do Aplicativo (Usando LocalStorage) -->
-    <script>
-        const LOCAL_STORAGE_KEY = 'local_meetings_checklist'; // Chave de armazenamento
-        let allMeetings = []; // Armazena a lista completa do LocalStorage
-        let showCompleted = true; // Estado para controlar a exibição dos itens concluídos (TRUE = MOSTRAR TUDO)
-        let currentFilterDate = null; // Armazena a data de filtro (YYYY-MM-DD)
-        let isFullScreenMode = false; // Estado para controlar o modo tela cheia
-        
-        // ===========================================
-        // FUNÇÕES BÁSICAS DE ARMAZENAMENTO LOCAL
-        // ===========================================
+    <!-- Lógica do Aplicativo (Usando Firebase Firestore) -->
+    <script type="module">
+        // Importações do Firebase
+        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Carrega a lista do localStorage
-        function loadMeetings() {
-            try {
-                const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-                allMeetings = stored ? JSON.parse(stored) : [];
-            } catch (e) {
-                console.error("Erro ao carregar do LocalStorage:", e);
-                allMeetings = [];
-            }
-            // Chama a renderização após carregar
-            renderMeetings(allMeetings);
-        }
+        // Variáveis globais do Firebase
+        let app, db, auth;
+        let userId = null;
+        let isAuthReady = false;
 
-        // Salva a lista no localStorage
-        function saveMeetings() {
-            try {
-                // Ordena antes de salvar para manter a consistência, usando a mesma lógica de ordenação
-                allMeetings.sort((a, b) => {
-                    if (a.completed !== b.completed) {
-                        return a.completed ? 1 : -1; 
-                    }
-                    return (a.timestamp || 0) - (b.timestamp || 0);
-                });
-                
-                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(allMeetings));
-            } catch (e) {
-                console.error("Erro ao salvar no LocalStorage:", e);
-                showMessage("Erro ao salvar dados localmente.", 'error');
-            }
-        }
+        // Variáveis de Estado da Aplicação
+        let allMeetings = [];
+        let showCompleted = true; 
+        let currentFilterDate = null; 
+        let isFullScreenMode = false; 
+
+        // Configurações Globais (Fornecidas pelo ambiente)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
+        // Log do Firebase (ajuda na depuração)
+        setLogLevel('Debug');
+        
+        // Caminho da Coleção Pública
+        const COLLECTION_PATH = `artifacts/${appId}/public/data/meetings`;
+
+
         // ===========================================
         // FUNÇÕES UTILITÁRIAS
         // ===========================================
 
-        // Função para gerar IDs únicos (já que não há Firestore)
-        function generateUniqueId() {
-            return Date.now().toString(36) + Math.random().toString(36).substring(2);
-        }
-        
-        // Função para preencher o dropdown de horário (para Adicionar e Editar)
+        // Função para preencher o dropdown de horário
         function generateTimeOptions(selectedTime = '') {
             let optionsHtml = '<option value="">-- Hora (Opcional) --</option>';
-            // Itera pelas horas (0 a 23)
             for (let h = 0; h < 24; h++) {
-                // Itera pelos minutos (0, 15, 30, 45)
                 for (let m = 0; m < 60; m += 15) {
                     const hour = h.toString().padStart(2, '0');
                     const minute = m.toString().padStart(2, '0');
                     const time = `${hour}:${minute}`;
                     const isSelected = (time === selectedTime) ? 'selected' : '';
-                    
                     optionsHtml += `<option value="${time}" ${isSelected}>${time}</option>`;
                 }
             }
@@ -240,14 +222,13 @@
             messageBox.textContent = msg;
             messageBox.className = `fixed top-4 right-4 text-white p-4 rounded-lg shadow-xl z-50 show ${bgColorClass}`;
             
-            // Esconde a mensagem após 3 segundos
             setTimeout(() => {
                 messageBox.classList.remove('show');
                 setTimeout(() => messageBox.className = 'fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50', 500);
             }, 3000);
         }
         
-        // Helper function to format YYYY-MM-DD to DD/MM/YYYY
+        // Função para formatar YYYY-MM-DD para DD/MM/YYYY
         function formatDateDisplay(dateKey) {
             if (dateKey === 'Sem Data' || !dateKey || dateKey.trim() === '') return 'Sem Data Agendada';
             try {
@@ -259,6 +240,224 @@
                 console.error("Erro ao formatar data:", e);
             }
             return dateKey;
+        }
+
+
+        // ===========================================
+        // INICIALIZAÇÃO E AUTENTICAÇÃO DO FIREBASE
+        // ===========================================
+
+        async function initializeFirebase() {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Listener de autenticação: garante que o código só continue após o login
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('currentUserId').textContent = userId;
+                        isAuthReady = true;
+                        // Inicia o listener do Firestore APÓS a autenticação
+                        setupFirestoreListener(); 
+                    } else {
+                        // Tenta fazer login automaticamente
+                        handleInitialAuth();
+                    }
+                });
+            } catch (error) {
+                console.error("Erro na inicialização do Firebase:", error);
+                showMessage("Erro ao iniciar a comunicação. Tente recarregar a página.", 'error');
+            }
+        }
+
+        async function handleInitialAuth() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Erro na autenticação:", error);
+                showMessage("Erro de autenticação. Os dados não serão salvos.", 'error');
+                isAuthReady = true; // Permite que a UI carregue, mesmo sem login
+            }
+        }
+
+        // ===========================================
+        // FUNÇÕES FIREBASE CRUD
+        // ===========================================
+
+        // Configura o listener em tempo real (onSnapshot)
+        function setupFirestoreListener() {
+            if (!isAuthReady || !db) return;
+
+            const meetingsCollectionRef = collection(db, COLLECTION_PATH);
+            
+            // O Firestore não suporta 'orderBy' sem índices complexos, então apenas faremos uma consulta básica 
+            // e a ordenação será feita localmente no JavaScript.
+            const q = query(meetingsCollectionRef); 
+
+            onSnapshot(q, (snapshot) => {
+                const meetings = [];
+                snapshot.forEach(doc => {
+                    meetings.push({ 
+                        id: doc.id, 
+                        ...doc.data() 
+                    });
+                });
+                
+                // Ordenação Local: Concluídas no final, depois por timestamp (data/hora)
+                meetings.sort((a, b) => {
+                    if (a.completed !== b.completed) {
+                        return a.completed ? 1 : -1; 
+                    }
+                    return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0);
+                });
+
+                allMeetings = meetings;
+                renderMeetings(allMeetings);
+                document.getElementById('loadingMessage').classList.add('hidden'); // Esconde a mensagem de carregamento
+            }, (error) => {
+                console.error("Erro ao carregar dados em tempo real:", error);
+                showMessage("Falha na comunicação em tempo real.", 'error');
+            });
+        }
+        
+        // Adicionar Reunião
+        window.addMeeting = async function() {
+            if (!isAuthReady || !db) {
+                showMessage("Autenticação pendente. Tente novamente.", 'error');
+                return;
+            }
+
+            const input = document.getElementById('newMeetingText');
+            const dateInput = document.getElementById('newMeetingDate');
+            const timeInput = document.getElementById('newMeetingTime');
+            const responsibleInput = document.getElementById('newMeetingResponsible');
+            
+            const text = input.value.trim();
+            const date = dateInput.value;
+            const time = timeInput.value; 
+            const responsible = responsibleInput.value.trim(); 
+            
+            if (text === "") {
+                showMessage("Por favor, digite a descrição da reunião.", 'error');
+                return;
+            }
+            
+            // Tenta criar um objeto Date para o campo 'timestamp' no Firestore
+            let meetingDate = null;
+            if (date) {
+                let dateTimeString = `${date}`;
+                if (time) {
+                    dateTimeString = `${date}T${time}:00`;
+                } else {
+                    dateTimeString = `${date}T12:00:00`; // Meio-dia se não houver hora
+                }
+                const parsedDate = new Date(dateTimeString);
+                if (!isNaN(parsedDate.getTime())) {
+                    meetingDate = parsedDate;
+                }
+            }
+
+            const newMeeting = {
+                text: text,
+                date: date || '', 
+                time: time || '',
+                responsible: responsible,
+                completed: false,
+                // O Firestore usa serverTimestamp() ou um objeto Date para ordenar
+                timestamp: meetingDate ? meetingDate : serverTimestamp(), 
+                createdBy: userId
+            };
+            
+            try {
+                await addDoc(collection(db, COLLECTION_PATH), newMeeting);
+                input.value = ''; 
+                responsibleInput.value = ''; 
+                showMessage("Reunião adicionada!");
+            } catch (e) {
+                console.error("Erro ao adicionar documento:", e);
+                showMessage("Erro ao adicionar reunião (Firestore).", 'error');
+            }
+        }
+
+        // Salvar Edição
+        window.saveMeetingEdit = async function(id) {
+            if (!isAuthReady || !db) return;
+
+            const newText = document.getElementById(`edit-text-${id}`).value.trim();
+            const newResponsible = document.getElementById(`edit-responsible-${id}`).value.trim();
+            const newDate = document.getElementById(`edit-date-${id}`).value;
+            const newTime = document.getElementById(`edit-time-${id}`).value;
+
+            if (newText === "") {
+                showMessage("A descrição da reunião não pode estar vazia.", 'error');
+                return;
+            }
+            
+            let meetingDate = null;
+            if (newDate) {
+                let dateTimeString = `${newDate}`;
+                if (newTime) {
+                    dateTimeString = `${newDate}T${newTime}:00`;
+                } else {
+                    dateTimeString = `${newDate}T12:00:00`;
+                }
+                const parsedDate = new Date(dateTimeString);
+                if (!isNaN(parsedDate.getTime())) {
+                    meetingDate = parsedDate;
+                }
+            }
+            
+            const updates = {
+                text: newText,
+                responsible: newResponsible,
+                date: newDate || '', 
+                time: newTime || '', 
+                timestamp: meetingDate ? meetingDate : serverTimestamp(), 
+            };
+            
+            try {
+                await updateDoc(doc(db, COLLECTION_PATH, id), updates);
+                toggleEditMode(id, false);
+                showMessage("Reunião atualizada!");
+            } catch (e) {
+                console.error("Erro ao atualizar documento:", e);
+                showMessage("Erro ao atualizar reunião (Firestore).", 'error');
+            }
+        }
+
+        // Alternar Status (Concluído/Não Concluído)
+        window.toggleCompleted = async function(id, currentStatus) {
+            if (!isAuthReady || !db) return;
+            
+            try {
+                await updateDoc(doc(db, COLLECTION_PATH, id), {
+                    completed: !currentStatus
+                });
+            } catch (e) {
+                console.error("Erro ao alternar status:", e);
+                showMessage("Erro ao marcar status (Firestore).", 'error');
+            }
+            // Não precisa chamar renderMeetings, o onSnapshot fará isso
+        }
+
+        // Excluir Reunião
+        window.deleteMeeting = async function(id) {
+            if (!isAuthReady || !db) return;
+            
+            try {
+                await deleteDoc(doc(db, COLLECTION_PATH, id));
+                showMessage("Reunião excluída!");
+            } catch (e) {
+                console.error("Erro ao excluir documento:", e);
+                showMessage("Erro ao excluir reunião (Firestore).", 'error');
+            }
+            // Não precisa chamar renderMeetings, o onSnapshot fará isso
         }
 
 
@@ -296,25 +495,21 @@
             }
         }
         
-        // Função para alternar o filtro de visualização (concluídas)
         window.toggleFilter = function(isChecked) {
-            showCompleted = !isChecked; // Se "Ocultar" está marcado, showCompleted é FALSE (esconde as concluídas)
+            showCompleted = !isChecked; 
             renderMeetings(allMeetings); 
         }
 
-        // Função para filtrar por data
         window.filterByDate = function(dateString) {
             currentFilterDate = dateString && dateString.trim() !== '' ? dateString : null;
             renderMeetings(allMeetings);
         }
         
-        // Função para limpar o filtro de data
         window.clearDateFilter = function() {
             document.getElementById('meetingDateFilter').value = '';
             filterByDate(null); 
         }
 
-        // Função para alternar entre o modo de visualização e edição
         window.toggleEditMode = function(id, isEnteringEdit) {
             const display = document.getElementById(`display-details-${id}`);
             const editForm = document.getElementById(`edit-form-${id}`);
@@ -335,133 +530,6 @@
             }
         }
         
-        // ===========================================
-        // FUNÇÕES CRUD (NOVO LOCALSTORAGE)
-        // ===========================================
-        
-        // Adicionar Reunião
-        window.addMeeting = function() {
-            const input = document.getElementById('newMeetingText');
-            const dateInput = document.getElementById('newMeetingDate');
-            const timeInput = document.getElementById('newMeetingTime');
-            const responsibleInput = document.getElementById('newMeetingResponsible');
-            
-            const text = input.value.trim();
-            const date = dateInput.value;
-            const time = timeInput.value; 
-            const responsible = responsibleInput.value.trim(); 
-            
-            if (text === "") {
-                showMessage("Por favor, digite a descrição da reunião.", 'error');
-                return;
-            }
-            
-            let meetingTimestamp = Date.now();
-            
-            if (date) {
-                let dateTimeString = `${date}`;
-                if (time) {
-                    dateTimeString = `${date}T${time}:00`;
-                } else {
-                    dateTimeString = `${date}T12:00:00`; 
-                }
-                const parsedDate = new Date(dateTimeString);
-                if (!isNaN(parsedDate.getTime())) {
-                    meetingTimestamp = parsedDate.getTime();
-                }
-            }
-
-            const newMeeting = {
-                id: generateUniqueId(), // Gera um ID único local
-                text: text,
-                date: date, 
-                time: time,
-                responsible: responsible,
-                completed: false,
-                timestamp: meetingTimestamp 
-            };
-
-            allMeetings.push(newMeeting);
-            saveMeetings(); // Salva e renderiza
-            
-            input.value = ''; 
-            responsibleInput.value = ''; 
-            showMessage("Reunião adicionada!");
-        }
-
-        // Salvar Edição
-        window.saveMeetingEdit = function(id) {
-            const index = allMeetings.findIndex(m => m.id === id);
-            if (index === -1) {
-                showMessage("Reunião não encontrada.", 'error');
-                return;
-            }
-
-            const newText = document.getElementById(`edit-text-${id}`).value.trim();
-            const newResponsible = document.getElementById(`edit-responsible-${id}`).value.trim();
-            const newDate = document.getElementById(`edit-date-${id}`).value;
-            const newTime = document.getElementById(`edit-time-${id}`).value;
-
-            if (newText === "") {
-                showMessage("A descrição da reunião não pode estar vazia.", 'error');
-                return;
-            }
-            
-            let meetingTimestamp = Date.now();
-            if (newDate) {
-                let dateTimeString = `${newDate}`;
-                if (newTime) {
-                    dateTimeString = `${newDate}T${newTime}:00`;
-                } else {
-                    dateTimeString = `${newDate}T12:00:00`; 
-                }
-                const parsedDate = new Date(dateTimeString);
-                if (!isNaN(parsedDate.getTime())) {
-                    meetingTimestamp = parsedDate.getTime();
-                }
-            }
-            
-            // Atualiza o objeto no array
-            allMeetings[index] = {
-                ...allMeetings[index],
-                text: newText,
-                responsible: newResponsible,
-                date: newDate, 
-                time: newTime, 
-                timestamp: meetingTimestamp
-            };
-            
-            saveMeetings();
-            toggleEditMode(id, false);
-            showMessage("Reunião atualizada!");
-        }
-
-        // Alternar Status (Concluído/Não Concluído)
-        window.toggleCompleted = function(id, currentStatus) {
-            const index = allMeetings.findIndex(m => m.id === id);
-            if (index !== -1) {
-                allMeetings[index].completed = !currentStatus;
-                saveMeetings();
-                // A renderização acontece automaticamente via saveMeetings
-            } else {
-                showMessage("Erro: Item não encontrado.", 'error');
-            }
-        }
-
-        // Excluir Reunião
-        window.deleteMeeting = function(id) {
-            const initialLength = allMeetings.length;
-            // Filtra o item a ser excluído
-            allMeetings = allMeetings.filter(m => m.id !== id);
-            
-            if (allMeetings.length < initialLength) {
-                saveMeetings();
-                showMessage("Reunião excluída!");
-            } else {
-                showMessage("Erro ao excluir item.", 'error');
-            }
-        }
-
         // ===========================================
         // FUNÇÃO DE RENDERIZAÇÃO
         // ===========================================
@@ -549,6 +617,7 @@
                                 ${responsibleDisplay ? `<span class="ml-2 text-gray-600 font-normal flex-shrink-0">${responsibleDisplay}</span>` : ''}
                             </div>
                         </div>
+                        <p class="text-xs text-gray-400 mt-1">Criado por: ${meeting.createdBy || 'Desconhecido'}</p>
                     `;
                     
                     // Conteúdo em modo de edição (o select de hora é gerado aqui)
@@ -589,7 +658,7 @@
                                    class="h-5 w-5 text-primary-light border-gray-300 rounded focus:ring-primary-light cursor-pointer flex-shrink-0 mt-0.5">
 
                             <!-- Display/Edit Container -->
-                            <div class="flex-grow ml-4 text-sm md:text-base min-w-0 space-y-2">
+                            <div class="flex-grow ml-4 text-sm md:text-base min-w-0 space-y-1">
                                 
                                 <!-- Display Mode -->
                                 <label for="check-${meeting.id}" id="display-details-${meeting.id}" class="flex-grow min-w-0 ${isCompleted ? 'cursor-default' : 'cursor-pointer'} block">
@@ -630,12 +699,10 @@
         // ===========================================
         window.onload = function() {
             populateTimeOptions();
-            loadMeetings(); // Carrega os dados ao iniciar
-            // A mensagem de carregamento é substituída na primeira renderização
+            initializeFirebase(); // Inicia o Firebase e o processo de autenticação
         }
 
     </script>
 
 </body>
 </html>
-Primeiro commit do checklist
