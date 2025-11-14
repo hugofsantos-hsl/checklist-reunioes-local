@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checklist de Reuniões (Modo Local)</title>
+    <!-- Carrega o Tailwind CSS para estilização moderna e responsiva -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Configuração do Tailwind para usar cores baseadas no novo tema
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#1e40af', // Cor principal (azul escuro - blue-800)
+                        'primary-light': '#3b82f6', // blue-500
+                        'primary-dark': '#1e40af', // blue-800
+                        'bg-light': '#ffffff', // Fundo principal
+                        'accent': '#1d4ed8', // blue-700 (para hover e foco)
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Estilos personalizados */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Fundo cinza suave */
+        }
+        .container-card {
+            background-color: var(--bg-light);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            max-width: 600px; /* Max width for normal view */
+        }
+        /* ESTILO: Para o modo tela cheia */
+        .full-screen-mode {
+            max-width: none !important; /* Override the max-width */
+            min-height: 100vh;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        .meeting-item {
+            transition: all 0.3s ease;
+        }
+        .completed-text {
+            text-decoration: line-through;
+            color: #9ca3af; /* Cinza claro para texto concluído */
+        }
+        /* Estilo para a caixa de mensagem de sucesso */
+        #messageBox {
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s, visibility 0.5s;
+        }
+        #messageBox.show {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="container-card w-full rounded-xl p-6 md:p-10">
+            <h1 class="text-3xl font-extrabold text-primary-dark mb-2 text-center">
+                📋 Checklist de Reuniões
+            </h1>
+            <p class="text-xs text-center text-primary-light mb-2 font-semibold">
+                Modo Local: Salvo apenas neste dispositivo (Offline)
+            </p>
+            <p id="statusDisplay" class="text-xs text-center text-red-500 mb-6 font-semibold">
+                Sem Colaboração: A lista é privada e não é compartilhada em tempo real.
+            </p>
+
+            <!-- Botão para Modo Tela Cheia/Sair -->
+            <div class="flex justify-end mb-4">
+                <button id="toggleViewButton" onclick="toggleFullScreenView()"
+                        class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-3 rounded-lg transition duration-150">
+                    Modo Tela Cheia
+                </button>
+            </div>
+
+            <!-- CONTROLES (Campos de Entrada e Filtros) -->
+            <div id="controlsContainer">
+                <!-- Campos de Entrada para Nova Reunião -->
+                <div class="space-y-3 mb-8">
+                    <input type="text" id="newMeetingText" placeholder="Descrição da reunião (Ex: Daily Standup)"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150 shadow-sm"
+                           onkeypress="if(event.key === 'Enter') addMeeting()">
+                    
+                    <!-- Campo: Responsável/Conta -->
+                    <input type="text" id="newMeetingResponsible" placeholder="Responsável/Conta (Ex: Pedro)"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150 shadow-sm">
+
+                    <div class="flex space-x-3">
+                        <!-- Campos Opcionais de Data -->
+                        <input type="date" id="newMeetingDate" title="Data da Reunião (Opcional)"
+                               class="w-1/2 p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150 shadow-sm text-gray-700">
+                        
+                        <!-- Select de Hora (15 em 15 minutos) -->
+                        <select id="newMeetingTime" title="Hora da Reunião (Opcional)"
+                                class="w-1/2 p-3 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150 shadow-sm text-gray-700">
+                            <option value="">-- Hora (Opcional) --</option>
+                            <!-- Opções de 15 em 15 minutos serão preenchidas via JavaScript -->
+                        </select>
+                    </div>
+
+                    <button onclick="addMeeting()"
+                            class="w-full bg-primary hover:bg-accent text-white font-semibold py-3 px-5 rounded-lg transition duration-200 ease-in-out shadow-md hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-primary-light/50">
+                        Adicionar Reunião
+                    </button>
+                </div>
+
+                <!-- Filtro de Reuniões -->
+                <div class="flex flex-col space-y-3 mb-4">
+                    <div class="flex justify-between items-center">
+                        <label class="flex items-center space-x-2 text-gray-700 cursor-pointer">
+                            <input type="checkbox" id="showCompletedToggle" 
+                                   onchange="toggleFilter(this.checked)" 
+                                   class="h-4 w-4 text-primary-light border-gray-300 rounded focus:ring-primary-light">
+                            <span class="text-sm">Ocultar reuniões concluídas</span>
+                        </label>
+                    </div>
+                    
+                    <!-- FILTRO DE DATA -->
+                    <div class="flex items-center space-x-2">
+                        <input type="date" id="meetingDateFilter" title="Filtrar por data"
+                               onchange="filterByDate(this.value)"
+                               class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary-light focus:border-primary-light transition duration-150 shadow-sm text-gray-700 text-sm">
+                        <button onclick="clearDateFilter()" 
+                                id="clearFilterButton"
+                                class="p-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-150"
+                                title="Limpar Filtro de Data">
+                            <!-- Ícone de Limpar (X) -->
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Lista de Reuniões -->
+            <div id="meetingsList" class="space-y-3">
+                <p class="text-center text-gray-500" id="loadingMessage">Carregando checklist...</p>
+                <!-- As reuniões serão renderizadas aqui -->
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Caixa de Mensagem Customizada (Substitui alert()) -->
+    <div id="messageBox" class="fixed top-4 right-4 bg-primary text-white p-4 rounded-lg shadow-xl z-50">
+        Operação realizada com sucesso!
+    </div>
+
+
+    <!-- Lógica do Aplicativo (Usando LocalStorage) -->
+    <script>
+        const LOCAL_STORAGE_KEY = 'local_meetings_checklist'; // Chave de armazenamento
+        let allMeetings = []; // Armazena a lista completa do LocalStorage
+        let showCompleted = true; // Estado para controlar a exibição dos itens concluídos (TRUE = MOSTRAR TUDO)
+        let currentFilterDate = null; // Armazena a data de filtro (YYYY-MM-DD)
+        let isFullScreenMode = false; // Estado para controlar o modo tela cheia
+        
+        // ===========================================
+        // FUNÇÕES BÁSICAS DE ARMAZENAMENTO LOCAL
+        // ===========================================
+
+        // Carrega a lista do localStorage
+        function loadMeetings() {
+            try {
+                const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+                allMeetings = stored ? JSON.parse(stored) : [];
+            } catch (e) {
+                console.error("Erro ao carregar do LocalStorage:", e);
+                allMeetings = [];
+            }
+            // Chama a renderização após carregar
+            renderMeetings(allMeetings);
+        }
+
+        // Salva a lista no localStorage
+        function saveMeetings() {
+            try {
+                // Ordena antes de salvar para manter a consistência, usando a mesma lógica de ordenação
+                allMeetings.sort((a, b) => {
+                    if (a.completed !== b.completed) {
+                        return a.completed ? 1 : -1; 
+                    }
+                    return (a.timestamp || 0) - (b.timestamp || 0);
+                });
+                
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(allMeetings));
+            } catch (e) {
+                console.error("Erro ao salvar no LocalStorage:", e);
+                showMessage("Erro ao salvar dados localmente.", 'error');
+            }
+        }
+        
+        // ===========================================
+        // FUNÇÕES UTILITÁRIAS
+        // ===========================================
+
+        // Função para gerar IDs únicos (já que não há Firestore)
+        function generateUniqueId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+        
+        // Função para preencher o dropdown de horário (para Adicionar e Editar)
+        function generateTimeOptions(selectedTime = '') {
+            let optionsHtml = '<option value="">-- Hora (Opcional) --</option>';
+            // Itera pelas horas (0 a 23)
+            for (let h = 0; h < 24; h++) {
+                // Itera pelos minutos (0, 15, 30, 45)
+                for (let m = 0; m < 60; m += 15) {
+                    const hour = h.toString().padStart(2, '0');
+                    const minute = m.toString().padStart(2, '0');
+                    const time = `${hour}:${minute}`;
+                    const isSelected = (time === selectedTime) ? 'selected' : '';
+                    
+                    optionsHtml += `<option value="${time}" ${isSelected}>${time}</option>`;
+                }
+            }
+            return optionsHtml;
+        }
+
+        // Função para popular o select de 'Adicionar Reunião'
+        function populateTimeOptions() {
+            const select = document.getElementById('newMeetingTime');
+            if (!select) return;
+            select.innerHTML = generateTimeOptions();
+        }
+
+        // Função para exibir mensagem (substitui alert())
+        function showMessage(msg, type = 'success') {
+            const messageBox = document.getElementById('messageBox');
+            const bgColorClass = type === 'success' ? 'bg-primary' : 'bg-red-600';
+            
+            messageBox.textContent = msg;
+            messageBox.className = `fixed top-4 right-4 text-white p-4 rounded-lg shadow-xl z-50 show ${bgColorClass}`;
+            
+            // Esconde a mensagem após 3 segundos
+            setTimeout(() => {
+                messageBox.classList.remove('show');
+                setTimeout(() => messageBox.className = 'fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50', 500);
+            }, 3000);
+        }
+        
+        // Helper function to format YYYY-MM-DD to DD/MM/YYYY
+        function formatDateDisplay(dateKey) {
+            if (dateKey === 'Sem Data' || !dateKey || dateKey.trim() === '') return 'Sem Data Agendada';
+            try {
+                const [year, month, day] = dateKey.split('-');
+                if (year && month && day) {
+                    return `${day}/${month}/${year}`;
+                }
+            } catch (e) {
+                console.error("Erro ao formatar data:", e);
+            }
+            return dateKey;
+        }
+
+
+        // ===========================================
+        // FUNÇÕES DE AÇÃO E FILTRO (GLOBAL)
+        // ===========================================
+        
+        window.toggleFullScreenView = function() {
+            isFullScreenMode = !isFullScreenMode;
+            const controlsContainer = document.getElementById('controlsContainer');
+            const toggleViewButton = document.getElementById('toggleViewButton');
+            const containerCard = document.querySelector('.container-card');
+            const body = document.body;
+            const appWrapper = document.querySelector('.min-h-screen.flex');
+
+            if (isFullScreenMode) {
+                controlsContainer.classList.add('hidden');
+                toggleViewButton.textContent = 'Sair da Tela Cheia';
+                body.classList.add('bg-white');
+                body.classList.remove('bg-f0f4f8'); 
+                containerCard.classList.add('full-screen-mode', 'w-full', 'p-4');
+                containerCard.classList.remove('rounded-xl', 'p-6', 'md:p-10');
+                appWrapper.classList.add('items-start', 'pt-4', 'pb-4');
+                appWrapper.classList.remove('items-center');
+
+            } else {
+                controlsContainer.classList.remove('hidden');
+                toggleViewButton.textContent = 'Modo Tela Cheia';
+                body.classList.remove('bg-white');
+                body.classList.add('bg-f0f4f8');
+                containerCard.classList.remove('full-screen-mode', 'w-full', 'p-4');
+                containerCard.classList.add('rounded-xl', 'p-6', 'md:p-10');
+                appWrapper.classList.remove('items-start', 'pt-4', 'pb-4');
+                appWrapper.classList.add('items-center');
+            }
+        }
+        
+        // Função para alternar o filtro de visualização (concluídas)
+        window.toggleFilter = function(isChecked) {
+            showCompleted = !isChecked; // Se "Ocultar" está marcado, showCompleted é FALSE (esconde as concluídas)
+            renderMeetings(allMeetings); 
+        }
+
+        // Função para filtrar por data
+        window.filterByDate = function(dateString) {
+            currentFilterDate = dateString && dateString.trim() !== '' ? dateString : null;
+            renderMeetings(allMeetings);
+        }
+        
+        // Função para limpar o filtro de data
+        window.clearDateFilter = function() {
+            document.getElementById('meetingDateFilter').value = '';
+            filterByDate(null); 
+        }
+
+        // Função para alternar entre o modo de visualização e edição
+        window.toggleEditMode = function(id, isEnteringEdit) {
+            const display = document.getElementById(`display-details-${id}`);
+            const editForm = document.getElementById(`edit-form-${id}`);
+            const editButton = document.getElementById(`edit-button-${id}`);
+            
+            if (!display || !editForm || !editButton) return;
+
+            if (isEnteringEdit) {
+                // Entrar no modo de edição
+                display.classList.add('hidden');
+                editForm.classList.remove('hidden');
+                editButton.classList.add('hidden'); 
+            } else {
+                // Sair do modo de edição (Cancelar ou Após Salvar)
+                display.classList.remove('hidden');
+                editForm.classList.add('hidden');
+                editButton.classList.remove('hidden'); 
+            }
+        }
+        
+        // ===========================================
+        // FUNÇÕES CRUD (NOVO LOCALSTORAGE)
+        // ===========================================
+        
+        // Adicionar Reunião
+        window.addMeeting = function() {
+            const input = document.getElementById('newMeetingText');
+            const dateInput = document.getElementById('newMeetingDate');
+            const timeInput = document.getElementById('newMeetingTime');
+            const responsibleInput = document.getElementById('newMeetingResponsible');
+            
+            const text = input.value.trim();
+            const date = dateInput.value;
+            const time = timeInput.value; 
+            const responsible = responsibleInput.value.trim(); 
+            
+            if (text === "") {
+                showMessage("Por favor, digite a descrição da reunião.", 'error');
+                return;
+            }
+            
+            let meetingTimestamp = Date.now();
+            
+            if (date) {
+                let dateTimeString = `${date}`;
+                if (time) {
+                    dateTimeString = `${date}T${time}:00`;
+                } else {
+                    dateTimeString = `${date}T12:00:00`; 
+                }
+                const parsedDate = new Date(dateTimeString);
+                if (!isNaN(parsedDate.getTime())) {
+                    meetingTimestamp = parsedDate.getTime();
+                }
+            }
+
+            const newMeeting = {
+                id: generateUniqueId(), // Gera um ID único local
+                text: text,
+                date: date, 
+                time: time,
+                responsible: responsible,
+                completed: false,
+                timestamp: meetingTimestamp 
+            };
+
+            allMeetings.push(newMeeting);
+            saveMeetings(); // Salva e renderiza
+            
+            input.value = ''; 
+            responsibleInput.value = ''; 
+            showMessage("Reunião adicionada!");
+        }
+
+        // Salvar Edição
+        window.saveMeetingEdit = function(id) {
+            const index = allMeetings.findIndex(m => m.id === id);
+            if (index === -1) {
+                showMessage("Reunião não encontrada.", 'error');
+                return;
+            }
+
+            const newText = document.getElementById(`edit-text-${id}`).value.trim();
+            const newResponsible = document.getElementById(`edit-responsible-${id}`).value.trim();
+            const newDate = document.getElementById(`edit-date-${id}`).value;
+            const newTime = document.getElementById(`edit-time-${id}`).value;
+
+            if (newText === "") {
+                showMessage("A descrição da reunião não pode estar vazia.", 'error');
+                return;
+            }
+            
+            let meetingTimestamp = Date.now();
+            if (newDate) {
+                let dateTimeString = `${newDate}`;
+                if (newTime) {
+                    dateTimeString = `${newDate}T${newTime}:00`;
+                } else {
+                    dateTimeString = `${newDate}T12:00:00`; 
+                }
+                const parsedDate = new Date(dateTimeString);
+                if (!isNaN(parsedDate.getTime())) {
+                    meetingTimestamp = parsedDate.getTime();
+                }
+            }
+            
+            // Atualiza o objeto no array
+            allMeetings[index] = {
+                ...allMeetings[index],
+                text: newText,
+                responsible: newResponsible,
+                date: newDate, 
+                time: newTime, 
+                timestamp: meetingTimestamp
+            };
+            
+            saveMeetings();
+            toggleEditMode(id, false);
+            showMessage("Reunião atualizada!");
+        }
+
+        // Alternar Status (Concluído/Não Concluído)
+        window.toggleCompleted = function(id, currentStatus) {
+            const index = allMeetings.findIndex(m => m.id === id);
+            if (index !== -1) {
+                allMeetings[index].completed = !currentStatus;
+                saveMeetings();
+                // A renderização acontece automaticamente via saveMeetings
+            } else {
+                showMessage("Erro: Item não encontrado.", 'error');
+            }
+        }
+
+        // Excluir Reunião
+        window.deleteMeeting = function(id) {
+            const initialLength = allMeetings.length;
+            // Filtra o item a ser excluído
+            allMeetings = allMeetings.filter(m => m.id !== id);
+            
+            if (allMeetings.length < initialLength) {
+                saveMeetings();
+                showMessage("Reunião excluída!");
+            } else {
+                showMessage("Erro ao excluir item.", 'error');
+            }
+        }
+
+        // ===========================================
+        // FUNÇÃO DE RENDERIZAÇÃO
+        // ===========================================
+
+        function renderMeetings(meetings) {
+            const meetingsList = document.getElementById('meetingsList');
+            if (!meetingsList) return;
+
+            // 1. Aplica o filtro de concluídas
+            let filteredMeetings = showCompleted 
+                ? meetings 
+                : meetings.filter(m => !m.completed); 
+
+            // 2. Aplica o filtro de data
+            if (currentFilterDate) {
+                filteredMeetings = filteredMeetings.filter(m => m.date === currentFilterDate);
+            }
+            
+            // Mensagens de lista vazia
+            if (filteredMeetings.length === 0) {
+                const filterDateDisplay = currentFilterDate ? formatDateDisplay(currentFilterDate) : null;
+                let message;
+                if (currentFilterDate) {
+                    message = `Nenhuma reunião encontrada para a data: ${filterDateDisplay}.`;
+                } else if (!showCompleted) {
+                    message = 'Todas as reuniões restantes foram concluídas. Desmarque "Ocultar reuniões concluídas" para ver o histórico.';
+                } else {
+                    message = 'Nenhuma reunião agendada. Adicione uma!';
+                }
+                meetingsList.innerHTML = `<p class="text-center text-gray-500 p-4">${message}</p>`;
+                return;
+            }
+
+            // 3. Agrupa as reuniões por data
+            const groupedMeetings = filteredMeetings.reduce((acc, meeting) => {
+                const dateKey = meeting.date && meeting.date.trim() !== '' ? meeting.date : 'Sem Data';
+                if (!acc[dateKey]) { acc[dateKey] = []; }
+                acc[dateKey].push(meeting);
+                return acc;
+            }, {});
+
+            // 4. Ordena as chaves de data (do mais antigo para o mais novo)
+            const sortedDates = Object.keys(groupedMeetings).sort((a, b) => {
+                if (a === 'Sem Data') return 1;
+                if (b === 'Sem Data') return -1;
+                return new Date(a) - new Date(b); 
+            });
+            
+            // 5. Constrói o HTML
+            let htmlContent = '';
+            
+            sortedDates.forEach(dateKey => {
+                const meetingsForDay = groupedMeetings[dateKey];
+                
+                let headerDisplay;
+                if (dateKey === 'Sem Data') {
+                    headerDisplay = 'Sem Data Agendada';
+                } else {
+                    headerDisplay = formatDateDisplay(dateKey);
+                }
+                
+                const isSingleDateFilter = currentFilterDate && sortedDates.length === 1 && dateKey === currentFilterDate;
+
+                if (!isSingleDateFilter || dateKey === 'Sem Data') {
+                    htmlContent += `
+                        <h3 class="text-lg font-bold text-gray-700 mt-6 mb-2 border-b-2 border-primary-light/50 pb-1">${headerDisplay}</h3>
+                    `;
+                }
+                
+                // Loop pelas reuniões do dia
+                meetingsForDay.forEach(meeting => {
+                    const isCompleted = meeting.completed;
+                    const completedClass = isCompleted ? 'bg-green-50 ring-2 ring-primary-light/30' : 'hover:bg-gray-50';
+                    const textClass = isCompleted ? 'completed-text' : 'text-gray-800';
+                    
+                    const timeDisplay = meeting.time && meeting.time.trim() !== '' ? meeting.time : '';
+                    const responsibleDisplay = meeting.responsible && meeting.responsible.trim() !== '' ? `(${meeting.responsible})` : '';
+
+                    // Conteúdo em modo de exibição
+                    const mainTextContent = `
+                        <div class="flex items-center min-w-0">
+                            ${timeDisplay ? `<span class="font-mono text-sm mr-3 flex-shrink-0 font-semibold ${textClass}">${timeDisplay}</span>` : ''}
+                            <div class="font-medium truncate ${textClass} flex-grow min-w-0">
+                                <span class="truncate">${meeting.text}</span>
+                                ${responsibleDisplay ? `<span class="ml-2 text-gray-600 font-normal flex-shrink-0">${responsibleDisplay}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Conteúdo em modo de edição (o select de hora é gerado aqui)
+                    const timeOptionsHtml = generateTimeOptions(meeting.time);
+                    const editFormHtml = `
+                        <div id="edit-form-${meeting.id}" class="hidden space-y-2 p-3 bg-gray-100 rounded-lg">
+                            <input type="text" id="edit-text-${meeting.id}" value="${meeting.text.replace(/"/g, '&quot;')}"
+                                   class="w-full p-2 border border-gray-300 rounded-lg text-sm" placeholder="Descrição da reunião">
+                            <input type="text" id="edit-responsible-${meeting.id}" value="${meeting.responsible ? meeting.responsible.replace(/"/g, '&quot;') : ''}"
+                                   placeholder="Responsável/Conta" class="w-full p-2 border border-gray-300 rounded-lg text-sm">
+                            <div class="flex space-x-2">
+                                <input type="date" id="edit-date-${meeting.id}" value="${meeting.date || ''}"
+                                       class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm">
+                                <select id="edit-time-${meeting.id}" class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm">
+                                    ${timeOptionsHtml}
+                                </select>
+                            </div>
+                            <div class="flex justify-end space-x-2 mt-2">
+                                <button onclick="saveMeetingEdit('${meeting.id}')"
+                                        class="text-xs bg-primary-light hover:bg-primary text-white font-semibold py-1 px-3 rounded-lg transition duration-150">
+                                    Salvar
+                                </button>
+                                <button onclick="toggleEditMode('${meeting.id}', false)"
+                                        class="text-xs bg-gray-400 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-lg transition duration-150">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    
+                    htmlContent += `
+                        <div class="meeting-item flex items-start p-4 rounded-xl border border-gray-200 ${completedClass} shadow-sm">
+                            <!-- Toggle Concluído (Checkbox azul) -->
+                            <input type="checkbox" id="check-${meeting.id}" 
+                                   ${isCompleted ? 'checked' : ''}
+                                   onclick="toggleCompleted('${meeting.id}', ${isCompleted})"
+                                   class="h-5 w-5 text-primary-light border-gray-300 rounded focus:ring-primary-light cursor-pointer flex-shrink-0 mt-0.5">
+
+                            <!-- Display/Edit Container -->
+                            <div class="flex-grow ml-4 text-sm md:text-base min-w-0 space-y-2">
+                                
+                                <!-- Display Mode -->
+                                <label for="check-${meeting.id}" id="display-details-${meeting.id}" class="flex-grow min-w-0 ${isCompleted ? 'cursor-default' : 'cursor-pointer'} block">
+                                    ${mainTextContent}
+                                </label>
+                                
+                                <!-- Edit Mode (Initially hidden) -->
+                                ${editFormHtml}
+                            </div>
+
+                            <!-- Actions (Edit/Delete) -->
+                            <div class="ml-4 flex items-center space-x-1 flex-shrink-0">
+                                <!-- Edit Button -->
+                                <button onclick="toggleEditMode('${meeting.id}', true)"
+                                        id="edit-button-${meeting.id}"
+                                        class="p-2 text-gray-500 hover:text-primary-light rounded-full hover:bg-gray-100 transition duration-150 ease-in-out ${isCompleted ? 'hidden' : ''}"
+                                        title="Editar Reunião">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                                </button>
+                                
+                                <!-- Delete Button -->
+                                <button onclick="deleteMeeting('${meeting.id}')"
+                                        class="p-2 text-red-500 hover:text-red-700 rounded-full hover:bg-red-50 transition duration-150 ease-in-out"
+                                        title="Excluir Reunião">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+            
+            meetingsList.innerHTML = htmlContent;
+        }
+
+        // ===========================================
+        // INICIA O APP
+        // ===========================================
+        window.onload = function() {
+            populateTimeOptions();
+            loadMeetings(); // Carrega os dados ao iniciar
+            // A mensagem de carregamento é substituída na primeira renderização
+        }
+
+    </script>
+
+</body>
+</html>
+Primeiro commit do checklist
