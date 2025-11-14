@@ -217,6 +217,7 @@
         // Função para exibir mensagem (substitui alert())
         function showMessage(msg, type = 'success') {
             const messageBox = document.getElementById('messageBox');
+            if (!messageBox) return; // Garante que o elemento existe
             const bgColorClass = type === 'success' ? 'bg-primary' : 'bg-red-600';
             
             messageBox.textContent = msg;
@@ -340,7 +341,11 @@
 
                 allMeetings = meetings;
                 renderMeetings(allMeetings);
-                document.getElementById('loadingMessage').classList.add('hidden'); // Esconde a mensagem de carregamento
+                // CORREÇÃO: Verifica se o elemento existe antes de tentar manipular suas classes.
+                const loadingMessageEl = document.getElementById('loadingMessage');
+                if (loadingMessageEl) {
+                    loadingMessageEl.classList.add('hidden'); // Esconde a mensagem de carregamento
+                }
             }, (error) => {
                 console.error("Erro ao carregar dados em tempo real:", error);
                 showMessage("Falha na comunicação em tempo real com o banco de dados.", 'error');
