@@ -253,19 +253,27 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
 
-                // Listener de autenticação: garante que o código só continue após o login
+                // 1. Configura o Listener de Autenticação primeiro
+                // Este listener será acionado imediatamente com o estado atual do usuário (null ou logado)
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
+                        // Se houver usuário (token ou anônimo)
                         userId = user.uid;
                         document.getElementById('currentUserId').textContent = userId;
                         isAuthReady = true;
-                        // Inicia o listener do Firestore APÓS a autenticação
+                        // Inicia o listener do Firestore APÓS a autenticação bem-sucedida
                         setupFirestoreListener(); 
                     } else {
-                        // Tenta fazer login automaticamente
-                        handleInitialAuth();
+                        // Se a autenticação falhar ou não houver usuário logado
+                        userId = 'Desconectado/Erro';
+                        document.getElementById('currentUserId').textContent = userId;
+                        isAuthReady = false; 
                     }
                 });
+                
+                // 2. Dispara a tentativa de login (token ou anônimo)
+                await handleInitialAuth();
+
             } catch (error) {
                 console.error("Erro na inicialização do Firebase:", error);
                 showMessage("Erro ao iniciar a comunicação. Tente recarregar a página.", 'error');
@@ -280,10 +288,11 @@
                     await signInAnonymously(auth);
                 }
             } catch (error) {
-                console.error("Erro na autenticação:", error);
-                showMessage("Erro de autenticação. Os dados não serão salvos.", 'error');
-                isAuthReady = true; // Permite que a UI carregue, mesmo sem login
+                console.error("Tentativa de autenticação falhou:", error);
+                // Exibe uma mensagem de erro, mas não chama a si mesmo novamente.
+                showMessage("Falha na autenticação inicial. Recarregue a página se os dados não aparecerem.", 'error');
             }
+            // O resultado (sucesso ou falha) será processado pelo onAuthStateChanged
         }
 
         // ===========================================
@@ -303,9 +312,21 @@
             onSnapshot(q, (snapshot) => {
                 const meetings = [];
                 snapshot.forEach(doc => {
+                    // Trata o timestamp do Firestore, que pode ser um objeto Timestamp ou um objeto Date (após update)
+                    let timestampValue = doc.data().timestamp;
+                    if (timestampValue && typeof timestampValue.toMillis === 'function') {
+                        timestampValue = timestampValue.toMillis();
+                    } else if (timestampValue instanceof Date) {
+                        timestampValue = timestampValue.getTime();
+                    } else if (typeof timestampValue !== 'number') {
+                        timestampValue = 0; // fallback para ordenação
+                    }
+
                     meetings.push({ 
                         id: doc.id, 
-                        ...doc.data() 
+                        ...doc.data(),
+                        // Garante que o timestamp é um número para ordenação
+                        timestamp: timestampValue
                     });
                 });
                 
@@ -314,7 +335,7 @@
                     if (a.completed !== b.completed) {
                         return a.completed ? 1 : -1; 
                     }
-                    return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0);
+                    return a.timestamp - b.timestamp;
                 });
 
                 allMeetings = meetings;
@@ -322,14 +343,14 @@
                 document.getElementById('loadingMessage').classList.add('hidden'); // Esconde a mensagem de carregamento
             }, (error) => {
                 console.error("Erro ao carregar dados em tempo real:", error);
-                showMessage("Falha na comunicação em tempo real.", 'error');
+                showMessage("Falha na comunicação em tempo real com o banco de dados.", 'error');
             });
         }
         
         // Adicionar Reunião
         window.addMeeting = async function() {
             if (!isAuthReady || !db) {
-                showMessage("Autenticação pendente. Tente novamente.", 'error');
+                showMessage("Aguarde a autenticação para adicionar reuniões.", 'error');
                 return;
             }
 
@@ -378,6 +399,8 @@
                 await addDoc(collection(db, COLLECTION_PATH), newMeeting);
                 input.value = ''; 
                 responsibleInput.value = ''; 
+                dateInput.value = ''; // Limpa a data após adicionar
+                timeInput.value = ''; // Limpa a hora após adicionar
                 showMessage("Reunião adicionada!");
             } catch (e) {
                 console.error("Erro ao adicionar documento:", e);
@@ -387,7 +410,10 @@
 
         // Salvar Edição
         window.saveMeetingEdit = async function(id) {
-            if (!isAuthReady || !db) return;
+            if (!isAuthReady || !db) {
+                 showMessage("Aguarde a autenticação para salvar edições.", 'error');
+                 return;
+            }
 
             const newText = document.getElementById(`edit-text-${id}`).value.trim();
             const newResponsible = document.getElementById(`edit-responsible-${id}`).value.trim();
@@ -433,7 +459,10 @@
 
         // Alternar Status (Concluído/Não Concluído)
         window.toggleCompleted = async function(id, currentStatus) {
-            if (!isAuthReady || !db) return;
+            if (!isAuthReady || !db) {
+                 showMessage("Aguarde a autenticação para alterar o status.", 'error');
+                 return;
+            }
             
             try {
                 await updateDoc(doc(db, COLLECTION_PATH, id), {
@@ -448,7 +477,10 @@
 
         // Excluir Reunião
         window.deleteMeeting = async function(id) {
-            if (!isAuthReady || !db) return;
+            if (!isAuthReady || !db) {
+                 showMessage("Aguarde a autenticação para excluir reuniões.", 'error');
+                 return;
+            }
             
             try {
                 await deleteDoc(doc(db, COLLECTION_PATH, id));
